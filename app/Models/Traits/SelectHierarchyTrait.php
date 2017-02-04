@@ -2,8 +2,6 @@
 
 namespace App\Models\Traits;
 
-use Baum\Node;
-
 trait SelectHierarchyTrait
 {
     /**
@@ -15,50 +13,46 @@ trait SelectHierarchyTrait
      */
     public static function getSelectHierarchy($belongsTo = null)
     {
-        $query = static::roots();
+        $query = new self;
 
-        if (!is_null($belongsTo)) {
-            $query->where('belongs_to', $belongsTo);
+        // Add the scope if required.
+        if ($belongsTo != null) {
+            $query->belongs_to = $belongsTo;
         }
 
-        $roots = $query->with('children')->get();
+        $nestedList = $query->getNestedListScoped('name', 'id', '-- ');
 
-        $options = [0 => 'None'];
+        // Trim away the unnecessary spaces (i.e. "-- -- Test" becomes "---- Test")
+        $nestedList = array_map(function ($item) {
+            return str_replace(' --', '--', $item);
+        }, $nestedList);
 
-        foreach ($roots as $root) {
-            $options = $options + static::getRenderedNode($root);
-        }
+        // Add the option for None.
+        $options = [0 => 'None'] + $nestedList;
 
         return $options;
     }
 
     /**
-     * Renders the specified category and it's children in single dimension array.
+     * Extend the provided getNestedList from Baum to support scopes.
+     * We simply changed all occupancies of $instance to $this.
      *
-     * @param Node $node
-     *
+     * @param $column
+     * @param null $key
+     * @param string $seperator
      * @return array
      */
-    public static function getRenderedNode(Node $node)
+    public function getNestedListScoped($column, $key = null, $seperator = ' ')
     {
-        $options = [];
+        $key = $key ?: $this->getKeyName();
+        $depthColumn = $this->getDepthColumnName();
 
-        if ($node->isRoot()) {
-            $name = $node->name;
-        } else {
-            $depth = str_repeat('--', $node->depth);
+        $nodes = $this->newNestedSetQuery()->get()->toArray();
 
-            $name = sprintf('%s %s', $depth, $node->name);
-        }
-
-        $options[$node->id] = $name;
-
-        if ($node->children()->count() > 0) {
-            foreach ($node->children as $child) {
-                $options = $options + static::getRenderedNode($child);
-            }
-        }
-
-        return $options;
+        return array_combine(array_map(function ($node) use ($key) {
+            return $node[$key];
+        }, $nodes), array_map(function ($node) use ($seperator, $depthColumn, $column) {
+            return str_repeat($seperator, $node[$depthColumn]) . $node[$column];
+        }, $nodes));
     }
 }
